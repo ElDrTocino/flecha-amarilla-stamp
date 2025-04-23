@@ -18,6 +18,10 @@ dependencies {
 
     implementation 'org.glassfish.jaxb:jaxb-runtime:3.0.2'
 
+    // Lombok
+    compileOnly 'org.projectlombok:lombok:1.18.32'
+    annotationProcessor 'org.projectlombok:lombok:1.18.32'
+
     // Utilidades JSON
     implementation 'io.quarkus:quarkus-rest-jackson'
 
