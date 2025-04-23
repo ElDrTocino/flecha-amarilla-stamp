@@ -2,6 +2,7 @@ package org.flechaamarilla.service;
 
 
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.annotation.PostConstruct;
 import jakarta.xml.soap.*;
 
 import java.io.ByteArrayOutputStream;
@@ -21,6 +22,7 @@ import javax.xml.transform.TransformerFactory;
 import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stream.StreamResult;
 import java.io.ByteArrayInputStream;
+import org.jboss.logging.Logger;
 
 @ApplicationScoped
 public class StampService {
@@ -28,14 +30,81 @@ public class StampService {
     private static final String USERNAME = "demo";
     private static final String PASSWORD = "demo";
     private static final String ENDPOINT = "https://demo-facturacion.finkok.com/servicios/soap/stamp.wsdl";
+    private static final Logger LOG = Logger.getLogger(StampService.class);
+    
+    // Caché para objetos utilizados frecuentemente
+    private static MessageFactory cachedMessageFactory;
+    private static SOAPConnectionFactory cachedConnectionFactory;
+    private static DocumentBuilderFactory cachedDocumentBuilderFactory;
+    private static TransformerFactory cachedTransformerFactory;
+    
+    // Tiempo de la última actualización del caché
+    private static LocalDateTime lastCacheRefresh;
+    
+    // Tiempo de expiración del caché en horas
+    private static final long CACHE_EXPIRATION_HOURS = 24;
+    
+    @PostConstruct
+    public void init() {
+        try {
+            refreshCache();
+            LOG.info("Caché de StampService inicializado correctamente");
+        } catch (Exception e) {
+            LOG.error("Error al inicializar caché de StampService", e);
+        }
+    }
+    
+    /**
+     * Refresca todos los recursos en caché
+     */
+    public synchronized void refreshCache() throws Exception {
+        LOG.info("Refrescando caché de StampService...");
+        
+        // Inicializar factories de SOAP
+        cachedMessageFactory = MessageFactory.newInstance();
+        cachedConnectionFactory = SOAPConnectionFactory.newInstance();
+        
+        // Inicializar factories de XML
+        cachedDocumentBuilderFactory = DocumentBuilderFactory.newInstance();
+        cachedDocumentBuilderFactory.setNamespaceAware(true);
+        
+        cachedTransformerFactory = TransformerFactory.newInstance();
+        
+        // Actualizar timestamp
+        lastCacheRefresh = LocalDateTime.now();
+        LOG.info("Caché de StampService actualizado");
+    }
+    
+    /**
+     * Verifica si el caché ha expirado
+     */
+    private boolean isCacheExpired() {
+        if (lastCacheRefresh == null) {
+            return true;
+        }
+        return lastCacheRefresh.plusHours(CACHE_EXPIRATION_HOURS).isBefore(LocalDateTime.now());
+    }
+    
+    /**
+     * Verifica y actualiza el caché si es necesario
+     */
+    private void checkAndRefreshCache() throws Exception {
+        if (cachedMessageFactory == null || cachedConnectionFactory == null ||
+            cachedDocumentBuilderFactory == null || cachedTransformerFactory == null ||
+            isCacheExpired()) {
+            refreshCache();
+        }
+    }
 
     public String stamp(String xmlFirmado) throws Exception {
+        // Verificar caché
+        checkAndRefreshCache();
+        
         // Codificar XML a base64
         String xmlBase64 = Base64.getEncoder().encodeToString(xmlFirmado.getBytes(StandardCharsets.UTF_8));
 
-        // Crear solicitud SOAP para Finkok
-        MessageFactory messageFactory = MessageFactory.newInstance();
-        SOAPMessage soapMessage = messageFactory.createMessage();
+        // Crear solicitud SOAP para Finkok usando factories en caché
+        SOAPMessage soapMessage = cachedMessageFactory.createMessage();
         SOAPPart soapPart = soapMessage.getSOAPPart();
 
         SOAPEnvelope envelope = soapPart.getEnvelope();
@@ -50,9 +119,8 @@ public class StampService {
 
         soapMessage.saveChanges();
 
-        // Enviar la solicitud SOAP
-        SOAPConnectionFactory soapConnectionFactory = SOAPConnectionFactory.newInstance();
-        SOAPConnection connection = soapConnectionFactory.createConnection();
+        // Enviar la solicitud SOAP usando conexión en caché
+        SOAPConnection connection = cachedConnectionFactory.createConnection();
         SOAPMessage response = connection.call(soapMessage, ENDPOINT);
 
         // Leer XML timbrado de la respuesta
@@ -65,10 +133,11 @@ public class StampService {
 
 
     public String localStamp(String xmlFirmado) throws Exception {
-        // Parse the XML document
-        DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
-        dbf.setNamespaceAware(true);
-        DocumentBuilder db = dbf.newDocumentBuilder();
+        // Verificar caché
+        checkAndRefreshCache();
+        
+        // Parse the XML document using cached factories
+        DocumentBuilder db = cachedDocumentBuilderFactory.newDocumentBuilder();
         Document doc = db.parse(new ByteArrayInputStream(xmlFirmado.getBytes(StandardCharsets.UTF_8)));
 
         // Get root element
@@ -115,9 +184,8 @@ public class StampService {
 
         complemento.appendChild(tfd);
 
-        // Transform document back to string
-        TransformerFactory tf = TransformerFactory.newInstance();
-        Transformer transformer = tf.newTransformer();
+        // Transform document back to string using cached transformer factory
+        Transformer transformer = cachedTransformerFactory.newTransformer();
         transformer.setOutputProperty(OutputKeys.ENCODING, "UTF-8");
         transformer.setOutputProperty(OutputKeys.INDENT, "yes");
 
